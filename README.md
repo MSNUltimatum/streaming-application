@@ -98,7 +98,9 @@ It looks for ip addresses from which a large number of clicks were made over a c
 This IPs Spark stores to redis cache and after that filters all rows and mark bots requests as 'bot'.
 
 Tests for DStream application:
+
 ![img.png](screens/DStreamTests.png?raw=true "Triggered dag")
 
 Tests for Structured Streaming application:
+
 ![img.png](screens/struct-test.png?raw=true "Triggered dag")
