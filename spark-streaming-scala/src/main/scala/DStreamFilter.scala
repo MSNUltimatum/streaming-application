@@ -15,6 +15,7 @@ import org.apache.spark.streaming.kafka010.{HasOffsetRanges, KafkaUtils}
 import java.util.UUID
 
 object DStreamFilter {
+  spark.sparkContext.setLogLevel("WARN")
   case class ReportData(id: String, ip: String, event_time: String, event_type: String, url: String, is_bot: Boolean)
 
   implicit val extractionFormat: DefaultFormats.type = DefaultFormats
@@ -72,23 +73,22 @@ object DStreamFilter {
   def writeBotsToRedis(eventsDetails: DStream[(String, EventDetails)]): Unit = {
     val bots = eventsDetails
       .filter(data => data._2.requestsCount > requestsCount)
-      .map(_._2.toString)
-
 
     bots.foreachRDD { rdd =>
-      spark.sparkContext.toRedisSET(rdd, redisBotsDs,redisTTL)
+      spark.sparkContext.toRedisHASH(rdd.map(row => (row._1, row._2.toString)), redisBotsDs,redisTTL)
     }
   }
 
   def saveToCassandra(requestsData: DStream[ReqData]): Unit = {
-    val botsSet = redis.smembers(redisBotsDs).get
-    requestsData.map(req => createFinalReport(req, botsSet))
+    requestsData
       .foreachRDD { rdd =>
-      rdd.saveToCassandra(cassandraKeySpace, cassandraTable, SomeColumns("id", "ip", "event_time", "event_type", "url", "is_bot"))
+        val currentRedisState = redis.hgetall(redisBotsDs)
+        val newRdd = rdd.map(row => createFinalReport(row, currentRedisState))
+        newRdd.saveToCassandra(cassandraKeySpace, cassandraTable, SomeColumns("id", "ip", "event_time", "event_type", "url", "is_bot"))
     }
   }
-  def createFinalReport(data: ReqData, botsSet: Set[Option[String]]): ReportData = {
-    val is_bot = botsSet.exists(rec => rec.nonEmpty && rec.get.contains(data.ip))
+  def createFinalReport(data: ReqData, redisState: Option[Map[String, String]]): ReportData = {
+    val is_bot = redisState.isDefined && redisState.get.contains(data.ip)
     ReportData(UUID.randomUUID().toString, data.ip, data.eventTime, data.eventType, data.url, is_bot)
   }
 }
