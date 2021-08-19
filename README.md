@@ -25,7 +25,7 @@ After that, in the docker, you could see the following services.
 
 ---
 
-##Kafka
+## Kafka
 
 Three Kafka brokers have been configured in the docker-compose file.
 They have got external ports: 9092, 9093, 9094 and internal ports: 19092, 19093, 19094.
@@ -39,7 +39,7 @@ Also, when the kafka is launched, a topic is created with the parameters:
 
 ---
 
-##Flume
+## Flume
 
 Flume service has build from the `flume.Dockerfile` in the resources' folder.
 It runs at the 40000 port and has the following configurations:
@@ -53,7 +53,7 @@ After that it uploads the required records to the Kafka topic.
 
 ---
 
-##Redis
+## Redis
 
 The Redis server is used to store suspicious bot IP addresses that Spark detects.
 It runs at the 6379 port.
@@ -65,7 +65,7 @@ an expired policy and will be deleted after 10 minutes.
 
 ---
 
-##Cassandra
+## Cassandra
 
 Cassandra is used as a permanent database. 
 All requests from Kafka stores in the Cassandra `botedetector` key space in the `bots` table.
