@@ -58,13 +58,6 @@ object StructuredStreamFilter {
       )
   }
 
-  def checkEventType(log: ReqData): EventDetailsWithTS = {
-    if (log.eventType.equals("click"))
-      EventDetailsWithTS(log.ip, 1, 0, 1, log.eventTime)
-    else
-      EventDetailsWithTS(log.ip, 0, 1, 1, log.eventTime)
-  }
-
   def writeToRedis(windowedDf: DataFrame): Unit = {
     windowedDf.writeStream
       .outputMode(OutputMode.Update)

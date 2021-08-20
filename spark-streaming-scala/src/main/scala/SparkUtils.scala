@@ -1,3 +1,5 @@
+import com.datastax.spark.connector.CassandraSparkExtensions
+
 import java.sql.Timestamp
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.sql.SparkSession
@@ -27,7 +29,7 @@ object SparkUtils {
   ))
 
   val clickToTransitions = 2L
-  val requestsCount = 20L
+  val requestsCount = 20
   val windowSize = 10
   val watermark = 10
 
@@ -46,6 +48,9 @@ object SparkUtils {
     .config("spark.redis.host", "localhost")
     .config("spark.redis.port", "6379")
     .config("spark.cassandra.connection.host", cassandraHost)
+    .withExtensions(new CassandraSparkExtensions)
+    .config("spark.sql.catalog.mycatalog", "com.datastax.spark.connector.datasource.CassandraCatalog")
+    .config("spark.cassandra.output.consistency.level", "ONE")
     .config("spark.cassandra.auth.username", "cassandra")
     .config("spark.cassandra.auth.password", "cassandra")
     .getOrCreate()
@@ -71,5 +76,12 @@ object SparkUtils {
       case Nil => null
       case arr: Array[String] => ReqData(arr(2), arr(0), arr(1), arr(3))
     }
+  }
+
+  def checkEventType(data: ReqData): EventDetailsWithTS = {
+    if (data.eventType.equals("click"))
+      EventDetailsWithTS(data.ip, 1, 0, 1, data.eventTime)
+    else
+      EventDetailsWithTS(data.ip, 0, 1, 1, data.eventTime)
   }
 }

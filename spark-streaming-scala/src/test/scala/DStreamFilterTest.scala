@@ -1,6 +1,6 @@
 import org.apache.spark.SparkConf
 import DStreamFilter._
-import SparkUtils.{ReqData, parseJsonString}
+import SparkUtils.{ReqData, checkEventType, parseJsonString}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
@@ -77,13 +77,11 @@ class DStreamFilterTest {
     val inputStream: InputDStream[String] = ssc.queueStream(inputData)
     inputData += sc.makeRDD(listData)
     val inputStreamReq: DStream[ReqData] = inputStream.map(str => parseJsonString(str))
-    val eventsStream = calculateEvents(inputStreamReq)
-    eventsStream.map(_._2).foreachRDD(rdd => {
-      val arrTupleOfIds = rdd.collect().partition(_.ip == "117.17.0.0")
-      assert(arrTupleOfIds._1.forall(_.requestsCount > 20))
-      assert(arrTupleOfIds._2.forall(_.requestsCount < 20))
-    })
-
+    inputStreamReq.map(data => (data.ip, checkEventType(data))).foreachRDD { rdd =>
+      val windowedRdd = windowedEventDetails(rdd)
+      val partitionedCollection = windowedRdd.map(_._2).collect().partition(_.ip == "117.17.0.0")
+      assert(partitionedCollection._1.forall(_.requestsCount > 20))
+      assert(partitionedCollection._2.forall(_.requestsCount < 20))
+    }
   }
-
 }

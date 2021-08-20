@@ -23,6 +23,18 @@ After that, in the docker, you could see the following services.
 
 ![img.png](screens/docker-env.png?raw=true "Docker")
 
+When the cassandra service is started and configured you will see the following logs:
+
+![img.png](screens/cassandra-logs.png?raw=true "Docker")
+
+Then you should run the command 
+
+`docker exec -d cassandra cqlsh -u cassandra -p cassandra -f cassandra.cql`
+
+to create keyspace and database.
+
+After that all services are configured, and you could start working.
+
 ---
 
 ## Kafka

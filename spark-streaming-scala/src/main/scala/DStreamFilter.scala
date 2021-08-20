@@ -4,6 +4,7 @@ import com.redis.RedisClient
 import com.redislabs.provider.redis.toRedisContext
 import net.liftweb.json._
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming
 import org.apache.spark.streaming.StreamingContext
@@ -16,6 +17,7 @@ import java.util.UUID
 
 object DStreamFilter {
   spark.sparkContext.setLogLevel("WARN")
+
   case class ReportData(id: String, ip: String, event_time: String, event_type: String, url: String, is_bot: Boolean)
 
   implicit val extractionFormat: DefaultFormats.type = DefaultFormats
@@ -47,36 +49,42 @@ object DStreamFilter {
   }
 
   def detectBots(requestsData: DStream[ReqData]): Unit = {
-    val eventDetails = calculateEvents(requestsData)
-
-    writeBotsToRedis(eventDetails)
-  }
-
-  def calculateEvents(requestsData: DStream[ReqData]) = {
     requestsData
-      .map(data => (data.ip, getEventDetails(data))).persist(StorageLevel.MEMORY_AND_DISK)
-      .reduceByKeyAndWindow((sumEvents: EventDetails, event: EventDetails) =>
-        EventDetails(sumEvents.ip,
-          sumEvents.clickRate + event.clickRate,
-          sumEvents.transitionsRate + event.transitionsRate,
-          sumEvents.requestsCount + event.requestsCount),
-        streaming.Seconds(windowSize), streaming.Seconds(windowSize))
+      .map(data => (data.ip, checkEventType(data))).persist(StorageLevel.MEMORY_AND_DISK)
+      .foreachRDD { rdd =>
+        if (!rdd.isEmpty()) {
+          val reducedRdd: RDD[(String, EventDetails)] = windowedEventDetails(rdd)
+
+          val filteredRdd = reducedRdd.filter(row => row._2.requestsCount > requestsCount)
+          spark.sparkContext.toRedisHASH(filteredRdd.map(row => (row._1, row._2.toString)), redisBotsDs, redisTTL)
+        }
+      }
   }
 
-  def getEventDetails(data: ReqData): EventDetails = {
-    if (data.eventType.equals("click"))
-      EventDetails(data.ip, 1, 0, 1)
-    else
-      EventDetails(data.ip, 0, 1, 1)
+  def windowedEventDetails(rdd: RDD[(String, EventDetailsWithTS)]): RDD[(String, EventDetails)] = {
+    val minTime = rdd.map(data => data._2.time).min()
+    val newRdd = rdd.map(data => createWindow(data, minTime))
+    val reducedRdd = newRdd.reduceByKey(reduceEventDetails)
+      .map(createEventDetails)
+    reducedRdd
   }
 
-  def writeBotsToRedis(eventsDetails: DStream[(String, EventDetails)]): Unit = {
-    val bots = eventsDetails
-      .filter(data => data._2.requestsCount > requestsCount)
+  def createEventDetails(eventDet: (String, EventDetailsWithTS)): (String, EventDetails) = {
+    (eventDet._1.split(":")(0), EventDetails(eventDet._2.ip, eventDet._2.clickRate,
+      eventDet._2.transitionsRate, eventDet._2.requestsCount))
+  }
 
-    bots.foreachRDD { rdd =>
-      spark.sparkContext.toRedisHASH(rdd.map(row => (row._1, row._2.toString)), redisBotsDs,redisTTL)
-    }
+  private def reduceEventDetails = {
+    (sumEvents: EventDetailsWithTS, event: EventDetailsWithTS) =>
+      EventDetailsWithTS(sumEvents.ip,
+        sumEvents.clickRate + event.clickRate,
+        sumEvents.transitionsRate + event.transitionsRate,
+        sumEvents.requestsCount + event.requestsCount, sumEvents.time)
+  }
+
+  def createWindow(tuple: (String, SparkUtils.EventDetailsWithTS), minTime: String): (String, EventDetailsWithTS) = {
+    val newKey = f"${tuple._1}:${(tuple._2.time.toLong - minTime.toLong) / windowSize}"
+    (newKey, tuple._2)
   }
 
   def saveToCassandra(requestsData: DStream[ReqData]): Unit = {
@@ -85,8 +93,9 @@ object DStreamFilter {
         val currentRedisState = redis.hgetall(redisBotsDs)
         val newRdd = rdd.map(row => createFinalReport(row, currentRedisState))
         newRdd.saveToCassandra(cassandraKeySpace, cassandraTable, SomeColumns("id", "ip", "event_time", "event_type", "url", "is_bot"))
-    }
+      }
   }
+
   def createFinalReport(data: ReqData, redisState: Option[Map[String, String]]): ReportData = {
     val is_bot = redisState.isDefined && redisState.get.contains(data.ip)
     ReportData(UUID.randomUUID().toString, data.ip, data.eventTime, data.eventType, data.url, is_bot)
